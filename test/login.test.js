@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import {readFileSync} from 'node:fs';
+import {organisms,roles} from '../lib/data.js';
+const code=readFileSync(new URL('../public/app.js',import.meta.url),'utf8').replace(/^import .*;\n/,'');
+for(const [pathname,search] of [['/teacher.html',''],['/','?mode=teacher'],['/','?mode=teacher&room=abc']])test('교사 로그인 즉시 표시: '+pathname+search,()=>{const els=new Map();let calls=0;const document={querySelector(s){if(!els.has(s))els.set(s,{innerHTML:'',style:{},addEventListener(){}});return els.get(s);}};vm.runInNewContext(code,{O:organisms,R:roles,document,URLSearchParams,location:{pathname,search},localStorage:{getItem(){return null;}},setInterval(){},window:{addEventListener(){}},fetch(){calls++;throw Error('로그인창 표시에 네트워크 불필요');}});assert.match(els.get('#app').innerHTML,/id="password"/);assert.match(els.get('#app').innerHTML,/20261016-3/);assert.equal(calls,0);});
