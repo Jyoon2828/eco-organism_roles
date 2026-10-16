@@ -14,6 +14,7 @@ if(req.method!=='POST')throw fail('POST만 사용할 수 있습니다.',405);
 const b=typeof req.body==='string'?JSON.parse(req.body):req.body||{};
 if(JSON.stringify(b).length>20000)throw fail('입력 내용이 너무 깁니다.');
 if(b.action==='login'){if(!equal(b.password,process.env.TEACHER_PASSWORD))throw fail('교사 비밀번호를 확인해 주세요.',401);const v=String(Date.now()+43200000);res.setHeader('Set-Cookie',`teacher=${v}.${sign(v)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${process.env.VERCEL?'; Secure':''}`);return res.json({ok:true});}
+if(b.action==='session'){if(!teacher(req))throw fail('교사 로그인이 필요합니다.',401);return res.json({ok:true});}
 if(!getApps().length)initializeApp({credential:cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))});
 const db=getFirestore();
 if(['create','teacher','phase','close'].includes(b.action)&&!teacher(req))throw fail('교사 로그인이 필요합니다.',401);
