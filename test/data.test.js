@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {organisms,validBoard} from '../lib/data.js';import {readFileSync,existsSync} from 'node:fs';
+test('첨부자료의 생물 8종과 역할 분포',()=>{assert.equal(organisms.length,8);assert.equal(new Set(organisms.map(o=>o.id)).size,8);assert.deepEqual(['p','c','d'].map(r=>organisms.filter(o=>o.role===r).length),[3,3,2]);});
+test('분류 요청 검증',()=>{assert.ok(validBoard({rabbit:'c',mold:'d'}));assert.ok(!validBoard({unknown:'p'}));assert.ok(!validBoard({rabbit:'x'}));assert.ok(!validBoard(null));});
+test('클라이언트 자료와 서버 자료 일치 및 사진 존재',()=>{assert.equal(readFileSync(new URL('../lib/data.js',import.meta.url),'utf8'),readFileSync(new URL('../public/data.js',import.meta.url),'utf8'));for(const o of organisms)assert.ok(existsSync(new URL('../public/assets/'+o.id+'.jpg',import.meta.url)));});
