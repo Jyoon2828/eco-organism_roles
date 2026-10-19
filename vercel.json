@@ -35,7 +35,7 @@
       }
     },
     {
-      "src": "/(app(?:-20261019)?|display-20261019|data)\\.js",
+      "src": "/(app(?:-20261019(?:-9)?)?|display-20261019|data|learning)\\.js",
       "dest": "/public/$1.js",
       "headers": {
         "Cache-Control": "no-cache, max-age=0, must-revalidate"
