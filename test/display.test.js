@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync,readdirSync} from 'node:fs';
 import {roles,getDeck,sentenceLead} from '../lib/data.js';
 
-const source=readFileSync(new URL('../public/display-20261019.js',import.meta.url),'utf8').replace(/^import .*;\n/,'');
+const source=readFileSync(new URL('../public/display-20261019-10.js',import.meta.url),'utf8').replace(/^import .*;\n/,'');
 function setup(search=''){
  const els=new Map(),root={innerHTML:'',classList:{toggle(){}}},notices={style:{}};
  els.set('#display',root);els.set('#notice',notices);els.set('#full',{addEventListener(){}});
@@ -21,7 +21,7 @@ test('최초에는 6모둠 전체 보기, 새 제출과 재제출은 해당 모�
  t.run('selected=null');accept(t,[submitted(2)]);assert.equal(t.run('selected'),null);
  accept(t,[submitted(2,2)]);assert.equal(t.run('selected'),2);
 });
-test('발표 중 자동 확대 끄기, 이전·다음 이동, 제출 해제 시 전체 보기',()=>{
+test('발표 중 자동 확대 끄기, 이전·다음 이동, 결과가 없는 모둠에서는 전체 보기',()=>{
  const t=setup();accept(t,[submitted(1)]);t.run('selected=1;autoOpen=false');accept(t,[submitted(1),submitted(3)]);assert.equal(t.run('selected'),1);
  t.run('move(1)');assert.equal(t.run('selected'),3);t.run('move(1)');assert.equal(t.run('selected'),1);t.run('move(-1)');assert.equal(t.run('selected'),3);
  accept(t,[submitted(1)]);assert.equal(t.run('selected'),null);assert.match(t.root.innerHTML,/우리 반 생물 분류 결과/);
@@ -47,6 +47,12 @@ test('학생·교사·전자칠판 전체 화면 소스에 한자 없음, 배포
  const publicURL=new URL('../public/',import.meta.url);
  for(const name of readdirSync(publicURL)){if(!/\.(js|html|css)$/.test(name))continue;assert.ok(!/\p{Script=Han}/u.test(readFileSync(new URL(name,publicURL),'utf8')),name);}
  const config=JSON.parse(readFileSync(new URL('../vercel.json',import.meta.url),'utf8'));
- for(const path of ['/display.html','/display-20261019.js','/display.css']){const route=config.routes.find(r=>new RegExp('^'+r.src+'$').test(path));assert.ok(route,path);}
- const teacher=readFileSync(new URL('../public/app-20261019-9.js',import.meta.url),'utf8');assert.match(teacher,/display.html\?room=/);assert.match(teacher,/전자칠판 링크 복사/);
+ for(const path of ['/display.html','/display-20261019-10.js','/display.css']){const route=config.routes.find(r=>new RegExp('^'+r.src+'$').test(path));assert.ok(route,path);}
+ const teacher=readFileSync(new URL('../public/app-20261019-10.js',import.meta.url),'utf8');assert.match(teacher,/display.html\?room=/);assert.match(teacher,/전자칠판 링크 복사/);
+});
+
+test('수정 중에도 전자칠판은 제출본과 연결 수업 확인 안내를 표시',()=>{
+ const t=setup(),g=submitted(1);g.revising=true;accept(t,[g]);
+ assert.match(t.root.innerHTML,/제출본 · 수정 중/);assert.match(t.root.innerHTML,/학생 공통 링크/);
+ t.run('selected=1;render()');assert.match(t.root.innerHTML,/1모둠의 탐구 발표/);assert.match(t.root.innerHTML,/스스로 양분을 만들기/);
 });

@@ -3,10 +3,12 @@ import {getFirestore} from 'firebase-admin/firestore';
 import {randomBytes,createHmac,timingSafeEqual} from 'node:crypto';
 import {organisms,validBoard,makeAssignments,getDeck,presentation} from '../lib/data.js';
 import {makeLearningSubmission,reflectionLabels} from '../lib/learning.js';
+import {getSubmission} from '../lib/submissions.js';
 const fail=(m,s=400)=>Object.assign(new Error(m),{status:s});
 function sign(v){return createHmac('sha256',process.env.SESSION_SECRET).update(v).digest('hex');}
 function equal(a,b){return typeof a==='string'&&typeof b==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));}
 function teacher(req){const t=(req.headers.cookie||'').split('; ').find(x=>x.startsWith('teacher='))?.slice(8)||'';const [v,s]=t.split('.');return v&&Number(v)>Date.now()&&equal(s,sign(v));}
+async function publishGroup(db,gr,room,group,editor){const deck=getDeck(room,group),ids=deck.map(o=>o.id);await db.runTransaction(async tx=>{const gs=await tx.get(gr),g=gs.data()||{};if(!validBoard(g.board,ids)||ids.some(id=>!g.board[id])||['p','c','d'].some(k=>!(g.reasons?.[k]?.trim().length>=3)))throw fail('8종을 모두 분류하고 세 역할의 이유를 각각 적어 주세요.');const submittedAt=Date.now(),reason=presentation(g.board,g.reasons,deck);tx.update(gr,{submitted:true,submittedAt,reason,submission:{board:{...g.board},reasons:{...g.reasons},reason,submittedAt,revision:g.revision||0},editor});});}
 export default async function handler(req,res){
 res.setHeader('Cache-Control','no-store');
 try{
@@ -18,11 +20,12 @@ if(b.action==='login'){if(!equal(b.password,process.env.TEACHER_PASSWORD))throw 
 if(b.action==='session'){if(!teacher(req))throw fail('교사 로그인이 필요합니다.',401);return res.json({ok:true});}
 if(!getApps().length)initializeApp({credential:cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))});
 const db=getFirestore();
-if(['create','teacher','display','phase','close'].includes(b.action)&&!teacher(req))throw fail('교사 로그인이 필요합니다.',401);
+if(['create','teacher','display','phase','close','publish'].includes(b.action)&&!teacher(req))throw fail('교사 로그인이 필요합니다.',401);
 if(b.action==='create'){const room=randomBytes(12).toString('hex');await db.collection('rolesRooms').doc(room).set({phase:0,created:Date.now(),closed:false,assignments:makeAssignments()});return res.json({room});}
 if(!/^[a-f0-9]{24}$/.test(b.room||''))throw fail('학생 공통 링크로 입장해 주세요.');
 const ref=db.collection('rolesRooms').doc(b.room),snap=await ref.get();if(!snap.exists)throw fail('수업을 찾을 수 없습니다.',404);const room=snap.data();
-if(b.action==='display'){const groups=await ref.collection('groups').get();return res.json({room:{phase:room.phase,closed:room.closed,assignments:room.assignments},groups:groups.docs.filter(x=>x.data().submitted).map(x=>{const g=x.data();return {id:x.id,board:g.board||{},reasons:g.reasons,reason:g.reason,submitted:true,submittedAt:g.submittedAt};})});}
+if(b.action==='publish'){if(room.phase<2)throw fail('모둠토의가 시작된 뒤 보낼 수 있습니다.');if(!Number.isInteger(b.group)||b.group<1||b.group>6)throw fail('모둠을 확인해 주세요.');await publishGroup(db,ref.collection('groups').doc(String(b.group)),room,b.group,'교사');return res.json({ok:true});}
+if(b.action==='display'){const groups=await ref.collection('groups').get();return res.json({roomId:b.room,room:{phase:room.phase,closed:room.closed,created:room.created||0,assignments:room.assignments},groups:groups.docs.map(x=>{const g=x.data(),saved=getSubmission(g);return saved?{id:x.id,...saved,submitted:true,revising:!g.submitted}:null;}).filter(Boolean)});}
 if(b.action==='teacher'){const groups=await ref.collection('groups').get();const members=await ref.collection('members').get();return res.json({room,groups:groups.docs.map(x=>({id:x.id,...x.data()})),members:members.docs.map(x=>({id:x.id,...x.data(),token:undefined}))});}
 if(b.action==='phase'){if(!Number.isInteger(b.phase)||b.phase<0||b.phase>4)throw fail('단계를 확인해 주세요.');await ref.update({phase:b.phase});return res.json({ok:true});}
 if(b.action==='close'){await ref.update({closed:true});return res.json({ok:true});}
@@ -38,13 +41,11 @@ if(b.action==='edit'){
  if(!Array.isArray(moves)||moves.length>16||!moves.every(m=>ids.includes(m.id)&&['p','c','d'].includes(m.role)))throw fail('분류할 생물을 확인해 주세요.');
  if(Object.keys(reasons).some(k=>!['p','c','d'].includes(k)||typeof reasons[k]!=='string'||reasons[k].length>400))throw fail('이유는 역할별 400자 이내로 적어 주세요.');
  if(room.phase===0){if(Object.keys(reasons).length)throw fail('모둠토의에서 이유를 적어 주세요.');const patch={};for(const m of moves)patch['board.'+m.id]=m.role;if(Object.keys(patch).length)await memberRef.update(patch);}
- else await db.runTransaction(async tx=>{const gs=await tx.get(gr),old=gs.data()||{},board={...(old.board||{})},notes={...(old.reasons||{}),...reasons};for(const m of moves)board[m.id]=m.role;tx.set(gr,{...old,board,reasons:notes,reason:presentation(board,notes,deck),revision:(old.revision||0)+1,submitted:false,editor:me.name});});
+ else await db.runTransaction(async tx=>{const gs=await tx.get(gr),old=gs.data()||{},board={...(old.board||{})},notes={...(old.reasons||{}),...reasons};let changed=false;for(const m of moves){if(board[m.id]!==m.role)changed=true;board[m.id]=m.role;}for(const [role,text] of Object.entries(reasons))if((old.reasons?.[role]||'')!==text)changed=true;if(!changed)return;const submission=getSubmission(old);tx.set(gr,{...old,...(submission?{submission}:{}),board,reasons:notes,reason:presentation(board,notes,deck),revision:(old.revision||0)+1,submitted:false,editor:me.name});});
 }
 else if(b.action==='submit'){
  if(room.phase!==2)throw fail('모둠토의 단계에서 제출해 주세요.');
- await db.runTransaction(async tx=>{const gs=await tx.get(gr),g=gs.data()||{};
- if(!validBoard(g.board,ids)||ids.some(id=>!g.board[id])||['p','c','d'].some(k=>!(g.reasons?.[k]?.trim().length>=3)))throw fail('8종을 모두 분류하고 세 역할의 이유를 각각 적어 주세요.');
- tx.update(gr,{submitted:true,submittedAt:Date.now(),reason:presentation(g.board,g.reasons,deck),editor:me.name});});
+ await publishGroup(db,gr,room,me.group,me.name);
 }
 else if(b.action==='learning'){
  if(room.phase!==4)throw fail('개인 정리 단계에서 제출해 주세요.');
